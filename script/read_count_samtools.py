@@ -32,7 +32,7 @@ def is_overlap(rstart, cigar, start, end):
         if c.isalpha() or c == "=":
             pos = int(cigar[pre:i])
             if c == "M" or c == "=":
-                if start < rstart+pos and rstart < end:
+                if start <= rstart+pos and rstart < end: #include start but exclude end
                     return True
             elif c == "D" or c == "N" or c == "X":
                 rstart += pos

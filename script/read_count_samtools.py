@@ -97,5 +97,5 @@ if __name__ == '__main__':
     else:
         bamout = "temp.bam"
         bedfile = bamout.replace(".bam", ".bed")
-        reffile = "refGene.txt"
+        reffile = "../example/refGene.txt"
         samtools_commands_for_featureCounts(bamout, bedfile, reffile)

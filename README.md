@@ -8,6 +8,9 @@
 
 ```
 python read_count_samtools.py [bam or sam file] [outputfile] refGene.txt
+# read count
+python read_count_samtools.py refGene.txt 500 > tss.gtf
+# refGene to gtf;
 ```
 
 * corresponding command for featureCounts
@@ -16,6 +19,9 @@ python read_count_samtools.py [bam or sam file] [outputfile] refGene.txt
 featureCounts -s 1 -O -a tss.gtf -o [outputfile] [bam or sam file]
 ```
 
+* sample shell script
+	* sample_comparison.sh
+	
 * <b>samtools\_commands\_for\_featureCounts</b>
 	* function
 	* arguments

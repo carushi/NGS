@@ -2,18 +2,25 @@ import os
 import sys
 import subprocess
 
+# The format of end position is different between refseq and gtf
+# gtf -> include end position
+# refGene -> exclude end position
+# samtools -> include end position
+# sam, refseq.gtf -> 1-based?
+# bam, refGene -> 0-based
 
 def start_position(contents, dist = 500):
     if contents[3] == "+":
-        return int(contents[4])-dist
+        return int(contents[4])-dist+1
     else:
-        return int(contents[5])-dist
+        return int(contents[5])-dist+1
 
 def end_position(contents, dist = 500):
     if contents[3] == "+":
-        return int(contents[4])+dist
+        return int(contents[4])+dist+1
     else:
-        return int(contents[5])+dist
+        return int(contents[5])+dist+1
+
 
 def get_ref_list(reffile):
     dict = {}
@@ -32,7 +39,7 @@ def is_overlap(rstart, cigar, start, end):
         if c.isalpha() or c == "=":
             pos = int(cigar[pre:i])
             if c == "M" or c == "=":
-                if start <= rstart+pos and rstart < end: #include start but exclude end
+                if start <= rstart+pos and rstart <= end: #include start and end
                     return True
             elif c == "D" or c == "N" or c == "X":
                 rstart += pos
@@ -62,6 +69,7 @@ def uniq_read_count(output, start, end):
 def samtools_commands_for_featureCounts(bamfile, bedfile, reffile, flagopt = "-F 256 ", printMode = False):
     with open(bedfile, 'w')  as f:
         dict = get_ref_list(reffile)
+        count = 0
         for gene in sorted(dict.keys()):
             output = b""
             for line in dict[gene]:
@@ -81,7 +89,11 @@ def samtools_commands_for_featureCounts(bamfile, bedfile, reffile, flagopt = "-F
                 else:
                     process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
                     output += process.communicate()[0]
-            if printMode:   continue
+            count = count+1
+            if count%(len(dict.keys())/10) == 0:
+                print("#", count%(len(dict.keys())/10), "completed...")
+            if printMode:
+                continue
             try:
                 wc = uniq_read_count(output, start, end)
                 f.write(str(wc)+"\n")
@@ -90,8 +102,22 @@ def samtools_commands_for_featureCounts(bamfile, bedfile, reffile, flagopt = "-F
                 print(sys.exc_info()[0])
                 raise
 
+def convert_refseq_to_tss_gtf(reffile):
+    with open(reffile) as f:
+        for line in f.readlines():
+            contents = line.rstrip('\n').split('\t')
+            start = start_position(contents)
+            end = end_position(contents)
+            print("\t".join([contents[2], contents[1], "gene", str(start+1), str(end), ".", contents[3], ".", "gene_id "+contents[1]]))
+            print("\t".join([contents[2], contents[1], "exon", str(start+1), str(end), ".", contents[3], ".", "gene_id "+contents[1]]))
+
 if __name__ == '__main__':
-    if len(sys.argv) > 3:
+    if len(sys.argv) <= 3:
+        if len(sys.argv) == 2:
+            convert_refseq_to_tss_gtf(sys.argv[1])
+        elif len(sys.argv) == 1:
+            convert_refseq_to_tss_gtf(sys.argv[1], int(sys.argv[2]))
+    elif len(sys.argv) > 3:
         argvs = sys.argv
         samtools_commands_for_featureCounts(argvs[1], argvs[2], argvs[3])
     else:

@@ -2,6 +2,8 @@ import os
 import sys
 import subprocess
 
+debug = False
+
 # The format of end position is different between refseq and gtf
 # gtf -> include end position
 # refGene -> exclude end position
@@ -11,16 +13,17 @@ import subprocess
 
 def start_position(contents, dist = 500):
     if contents[3] == "+":
-        return int(contents[4])-dist+1
+        tss = int(contents[4])+1
     else:
-        return int(contents[5])-dist+1
+        tss = (int(contents[5])-1)+1
+    return tss-dist
 
 def end_position(contents, dist = 500):
     if contents[3] == "+":
-        return int(contents[4])+dist+1
+        tss = int(contents[4])+1
     else:
-        return int(contents[5])+dist+1
-
+        tss = (int(contents[5])-1)+1
+    return tss+dist
 
 def get_ref_list(reffile):
     dict = {}
@@ -32,7 +35,7 @@ def get_ref_list(reffile):
             dict[contents[1]].append(line)
     return dict
 
-def is_overlap(rstart, cigar, start, end):
+def is_overlap(rstart, cigar, start, end, debug = False):
     pre = 0
     for i in range(1, len(cigar)):
         c = cigar[i]
@@ -42,7 +45,9 @@ def is_overlap(rstart, cigar, start, end):
             else:
                 pos = int(cigar[pre:i])
             if c == "M" or c == "=":
-                if start <= rstart+pos and rstart <= end: #include start and end
+                if debug:
+                    print(start-start, "-", end-start, ":", rstart-start, pos)
+                if start <= rstart+pos and rstart < end: #include start and exclude end
                     return True
                 rstart += pos
             elif c == "D" or c == "N" or c == "X":
@@ -52,13 +57,17 @@ def is_overlap(rstart, cigar, start, end):
             pre = i+1
     return False
 
-def uniq_read_count(output, start, end):
+def count_uniq_and_overlapped_reads(output, start, end, debug = False):
     wc = 0
     reads = str(output.decode("utf-8")).split('\n')
     for i in range(0, len(reads))[::-1]:
         if reads[i] in reads[0:i] or len(reads[i]) == 0:
             reads.pop(i)
+    if debug:
+        print(len(reads))
     for line in reads:
+        if debug:
+            print("wc:", wc, "Now processing:", line)
         if line[0:2] == "[E":
             raise Exception(line)
         contents = line.split('\t')
@@ -66,16 +75,45 @@ def uniq_read_count(output, start, end):
         if cigar[0:-1].isdigit():
             wc = wc+1
         else:
-            if is_overlap(int(contents[3]), cigar, start, end):
+            if is_overlap(int(contents[3]), cigar, start, end, debug):
                 wc = wc+1
     return wc
 
+def count_uniq_reads(reads):
+    for i in range(0, len(reads))[::-1]:
+        if reads[i] in reads[0:i] or len(reads[i]) == 0:
+            reads.pop(i)
+    return len(reads)
+
+def overlapped_reads(output, start, end, debug = False):
+    reads = str(output.decode("utf-8")).split('\n')
+    if debug:
+        print(len(reads))
+    overlappedReads = []
+    for line in reads:
+        if debug:
+            print("wc:", len(overlappedReads), "Now processing:", line)
+        if len(line) == 0:  continue
+        if line[0:2] == "[E":
+            raise Exception(line)
+        contents = line.split('\t')
+        cigar = contents[5]
+        if cigar[0:-1].isdigit():
+            overlappedReads.append(line)
+        else:
+            if is_overlap(int(contents[3]), cigar, start, end, debug):
+                overlappedReads.append(line)
+    return overlappedReads
+
 def samtools_commands_for_featureCounts(bamfile, bedfile, reffile, flagopt = "-F 256 ", printMode = False):
+    global debug
     with open(bedfile, 'w')  as f:
         dict = get_ref_list(reffile)
         count = 0
         for gene in sorted(dict.keys()):
+            if debug and gene != "NM_178113": continue
             output = b""
+            overlappedReads = []
             f.write(gene+"\t")
             for line in dict[gene]:
                 contents = line.rstrip('\n').split('\t')
@@ -87,19 +125,21 @@ def samtools_commands_for_featureCounts(bamfile, bedfile, reffile, flagopt = "-F
                     flag = "-F 16 "
                 else:
                     flag = "-f 16 "
-                cmd = "samtools view -m 1 "+flag+flagopt+" -t SP "+bamfile+" \""+chr+":"+str(start)+"-"+str(end)+"\" | grep NH:i:1 | grep -v NH:i:1[0-9] "
+                cmd = "samtools view -m 1 "+flag+flagopt+" -t SP "+bamfile+" \""+chr+":"+str(start)+"-"+str(end-1)+"\" | grep NH:i:1 | grep -v NH:i:1[0-9] "
                 if printMode:
                     print(cmd+"# "+gene)
                 else:
+                    if debug:   print(cmd)
                     process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
                     output += process.communicate()[0]
+                    overlappedReads += overlapped_reads(output, start, end, debug)
             count = count+1
             if count%(len(dict.keys())/10) == 0:
                 print("#", count%(len(dict.keys())/10), "completed...")
             if printMode:
                 continue
             try:
-                wc = uniq_read_count(output, start, end)
+                wc = count_uniq_reads(overlappedReads)
                 f.write(str(wc)+"\n")
                 f.flush()
             except:
@@ -112,8 +152,8 @@ def convert_refseq_to_tss_gtf(reffile):
             contents = line.rstrip('\n').split('\t')
             start = start_position(contents)
             end = end_position(contents)
-            print("\t".join([contents[2], contents[1], "gene", str(start+1), str(end), ".", contents[3], ".", "gene_id "+contents[1]]))
-            print("\t".join([contents[2], contents[1], "exon", str(start+1), str(end), ".", contents[3], ".", "gene_id "+contents[1]]))
+            print("\t".join([contents[2], contents[1], "gene", str(start), str(end-1), ".", contents[3], ".", "gene_id "+contents[1]]))
+            print("\t".join([contents[2], contents[1], "exon", str(start), str(end-1), ".", contents[3], ".", "gene_id "+contents[1]]))
 
 if __name__ == '__main__':
     if len(sys.argv) <= 3:

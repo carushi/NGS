@@ -37,10 +37,14 @@ def is_overlap(rstart, cigar, start, end):
     for i in range(1, len(cigar)):
         c = cigar[i]
         if c.isalpha() or c == "=":
-            pos = int(cigar[pre:i])
+            if i == pre:
+                pos = 1
+            else:
+                pos = int(cigar[pre:i])
             if c == "M" or c == "=":
                 if start <= rstart+pos and rstart <= end: #include start and end
                     return True
+                rstart += pos
             elif c == "D" or c == "N" or c == "X":
                 rstart += pos
             else: #P or H or S or I
@@ -72,12 +76,12 @@ def samtools_commands_for_featureCounts(bamfile, bedfile, reffile, flagopt = "-F
         count = 0
         for gene in sorted(dict.keys()):
             output = b""
+            f.write(gene+"\t")
             for line in dict[gene]:
                 contents = line.rstrip('\n').split('\t')
                 start = start_position(contents)
                 end = end_position(contents)
                 chr = contents[2]
-                f.write(gene+"\t")
                 flag = ""
                 if contents[3] == "+":
                     flag = "-F 16 "
